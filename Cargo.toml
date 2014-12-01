@@ -1,0 +1,17 @@
+[package]
+
+name = "randtri-rs"
+version = "0.0.1"
+authors = ["quote <quote@lv0.io>"]
+
+[dependencies.piston]
+git = "https://github.com/pistondevelopers/piston"
+
+[dependencies.glfw_window]
+git = "https://github.com/pistondevelopers/glfw_window"
+
+[dependencies.graphics]
+git = "https://github.com/pistondevelopers/graphics"
+
+[dependencies.opengl_graphics]
+git = "https://github.com/pistondevelopers/opengl_graphics"
