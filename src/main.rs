@@ -27,84 +27,6 @@ use event::{ Events, WindowSettings };
 use event::window::{ CaptureCursor };
 
 //----------------------------------------
-// Cube associated data
-
-#[vertex_format]
-struct Vertex {
-    #[as_float]
-    a_pos: [i8, ..3],
-    #[as_float]
-    a_tex_coord: [u8, ..2],
-}
-
-impl Vertex {
-    fn new(pos: [i8, ..3], tc: [u8, ..2]) -> Vertex {
-        Vertex {
-            a_pos: pos,
-            a_tex_coord: tc,
-        }
-    }
-}
-
-#[shader_param(CubeBatch)]
-struct Params {
-    u_model_view_proj: [[f32, ..4], ..4],
-    t_color: gfx::shade::TextureParam,
-}
-
-static VERTEX_SRC: gfx::ShaderSource<'static> = shaders! {
-GLSL_120: b"
-    #version 120
-    attribute vec3 a_pos;
-    attribute vec2 a_tex_coord;
-    varying vec2 v_TexCoord;
-    uniform mat4 u_model_view_proj;
-    void main() {
-        v_TexCoord = a_tex_coord;
-        gl_Position = u_model_view_proj * vec4(a_pos, 1.0);
-    }
-"
-GLSL_150: b"
-    #version 150 core
-    in vec3 a_pos;
-    in vec2 a_tex_coord;
-    out vec2 v_TexCoord;
-    uniform mat4 u_model_view_proj;
-    void main() {
-        v_TexCoord = a_tex_coord;
-        gl_Position = u_model_view_proj * vec4(a_pos, 1.0);
-    }
-"
-};
-
-static FRAGMENT_SRC: gfx::ShaderSource<'static> = shaders! {
-GLSL_120: b"
-    #version 120
-    varying vec2 v_TexCoord;
-    uniform sampler2D t_color;
-    void main() {
-        vec4 tex = texture2D(t_color, v_TexCoord);
-        float blend = dot(v_TexCoord-vec2(0.5,0.5), v_TexCoord-vec2(0.5,0.5));
-        gl_FragColor = mix(tex, vec4(0.0,0.0,0.0,0.0), blend*1.0);
-    }
-"
-GLSL_150: b"
-    #version 150 core
-    in vec2 v_TexCoord;
-    out vec4 o_Color;
-    uniform sampler2D t_color;
-    void main() {
-        vec4 tex = texture(t_color, v_TexCoord);
-        float blend = dot(v_TexCoord-vec2(0.5,0.5), v_TexCoord-vec2(0.5,0.5));
-        o_Color = vec4(0.0, 0.5, 0.8, 1.0);  // mix(tex, vec4(0.0,0.0,0.0,0.0), blend*1.0);
-    }
-"
-};
-
-//----------------------------------------
-
-
-//----------------------------------------
 // line associated data
 
 #[vertex_format]
@@ -136,43 +58,6 @@ impl LineVertex {
 struct LineParams {
     u_model_view_proj: [[f32, ..4], ..4],
 }
-
-// static LINE_VERTEX_SRC: gfx::ShaderSource<'static> = shaders! {
-// GLSL_120: b"
-//     #version 120
-//     attribute vec3 a_pos;
-//     uniform mat4 u_model_view_proj;
-//     void main() {
-//         gl_Position = u_model_view_proj * vec4(a_pos, 1.0);
-//     }
-// "
-// GLSL_150: b"
-//     #version 150 core
-//     in vec3 a_pos;
-//     uniform mat4 u_model_view_proj;
-//     void main() {
-//         gl_Position = u_model_view_proj * vec4(a_pos, 1.0);
-//     }
-// "
-// };
-// 
-// static LINE_FRAGMENT_SRC: gfx::ShaderSource<'static> = shaders! {
-// GLSL_120: b"
-//     #version 120
-//     uniform vec4 u_color;
-//     void main() {
-//         gl_FragColor = u_color;
-//     }
-// "
-// GLSL_150: b"
-//     #version 150 core
-//     out vec4 o_color;
-//     uniform vec4 u_color;
-//     void main() {
-//         o_color = u_color;
-//     }
-// "
-// };
 
 static LINE_VERTEX_SRC: gfx::ShaderSource<'static> = shaders! {
 GLSL_120: b"
@@ -217,9 +102,6 @@ GLSL_150: b"
 "
 };
 
-
-//----------------------------------------
-
 #[inline]
 fn rand_color() -> [f32, ..4] {
     [rand::random::<f32>(), rand::random::<f32>(), rand::random::<f32>(), 1.0]
@@ -240,137 +122,24 @@ fn main() {
 
     window.set_mut(CaptureCursor(true));
 
-    //let mut device = gfx::GlDevice::new(|s| window.gl_get_proc_address(s) );
-    let mut device = gfx::GlDevice::new(|s|
-        window.window.get_proc_address(s)
-    );
+    let mut device = gfx::GlDevice::new(|s| window.window.get_proc_address(s));
+    let mut graphics = gfx::Graphics::new(device);
     let mut frame = gfx::Frame::new(win_width as u16, win_height as u16);
     let state = gfx::DrawState::new().depth(gfx::state::LessEqual, true);
 
-    let vertex_data = vec![
-        //top (0, 0, 1)
-        Vertex::new([-1, -1,  1], [0, 0]),
-        Vertex::new([ 1, -1,  1], [1, 0]),
-        Vertex::new([ 1,  1,  1], [1, 1]),
-        Vertex::new([-1,  1,  1], [0, 1]),
-        //bottom (0, 0, -1)
-        Vertex::new([ 1,  1, -1], [0, 0]),
-        Vertex::new([-1,  1, -1], [1, 0]),
-        Vertex::new([-1, -1, -1], [1, 1]),
-        Vertex::new([ 1, -1, -1], [0, 1]),
-        //right (1, 0, 0)
-        Vertex::new([ 1, -1, -1], [0, 0]),
-        Vertex::new([ 1,  1, -1], [1, 0]),
-        Vertex::new([ 1,  1,  1], [1, 1]),
-        Vertex::new([ 1, -1,  1], [0, 1]),
-        //left (-1, 0, 0)
-        Vertex::new([-1,  1,  1], [0, 0]),
-        Vertex::new([-1, -1,  1], [1, 0]),
-        Vertex::new([-1, -1, -1], [1, 1]),
-        Vertex::new([-1,  1, -1], [0, 1]),
-        //front (0, 1, 0)
-        Vertex::new([-1,  1, -1], [0, 0]),
-        Vertex::new([ 1,  1, -1], [1, 0]),
-        Vertex::new([ 1,  1,  1], [1, 1]),
-        Vertex::new([-1,  1,  1], [0, 1]),
-        //back (0, -1, 0)
-        Vertex::new([ 1, -1,  1], [0, 0]),
-        Vertex::new([-1, -1,  1], [1, 0]),
-        Vertex::new([-1, -1, -1], [1, 1]),
-        Vertex::new([ 1, -1, -1], [0, 1]),
 
-        // extras
-        Vertex::new([0, 0, 0], [0, 0]), // 24
-        Vertex::new([1, 0, 0], [1, 0]), // 25
-        Vertex::new([1, 1, 0], [1, 1]), // 26
-        Vertex::new([0, 1, 0], [0, 1]), // 27
-        Vertex::new([0, 0, 1], [0, 1]), // 28
-    ];
-
-    let mesh = device.create_mesh(vertex_data.as_slice());
-
-//    let index_data: &[u8] = &[
-//         0,  1,  2,  2,  3,  0, // top
-//         4,  6,  5,  6,  4,  7, // bottom
-//         8,  9, 10, 10, 11,  8, // right
-//        12, 14, 13, 14, 12, 16, // left
-//        16, 18, 17, 18, 16, 19, // front
-//        20, 21, 22, 22, 23, 20, // back
-//    ];
-
-    // cube-outline index data
-    let index_data: &[u8] = &[
-        //0, 1, 1, 2, 2, 3, 3, 0,
-        //8, 9, 9, 10, 10, 11, 11, 8, // right
-        //16, 17, 17, 18, 18, 19, 19, 16, // front
-        24, 25, 24, 27, 24, 28 // angle
-    ];
-
-    let slice = device
-        .create_buffer_static::<u8>(index_data)
-        .to_slice(gfx::Line);
-    
-    let tinfo = gfx::tex::TextureInfo {
-        width: 1,
-        height: 1,
-        depth: 1,
-        levels: 1,
-        kind: gfx::tex::Texture2D,
-        format: gfx::tex::RGBA8,
-    };
-    let img_info = tinfo.to_image_info();
-    let texture = device.create_texture(tinfo).unwrap();
-    device.update_texture(
-            &texture, 
-            &img_info,
-            //vec![0x20u8, 0xA0u8, 0xC0u8, 0x00u8].as_slice()
-            vec![0xffu8, 0xffu8, 0x00u8, 0x00u8].as_slice() // rgba
-        ).unwrap();
-
-    let sampler = device.create_sampler(
-        gfx::tex::SamplerInfo::new(
-            gfx::tex::Bilinear, 
-            gfx::tex::Clamp
-        )
-    );
-    
-    let program = device.link_program(
-            VERTEX_SRC.clone(), 
-            FRAGMENT_SRC.clone()
-        ).unwrap();
-
-    let mut graphics = gfx::Graphics::new(device);
-    let batch: CubeBatch = graphics.make_batch(&program, &mesh, slice, &state).unwrap();
-
-    let mut data = Params {
-        u_model_view_proj: vecmath::mat4_id(),
-        t_color: (texture, Some(sampler)),
-    };
-
-
-
-
-
-    // -------------------------
     // start linedrawing prep
     let num_points = 1024;
     let mut lines_vd = Vec::from_fn(num_points, |i| {
         LineVertex::rand_pos(rand_color())
     });
-    // let lines_vd = vec![
-    //     LineVertex::new([-1,  1,  1], [1.0, 1.0, 1.0, 1.0]),
-    //     LineVertex::new([ 1,  1,  1], [1.0, 1.0, 1.0, 1.0]),
-    //     LineVertex::new([ 1,  3,  1], [1.0, 1.0, 1.0, 1.0]),
-    //     LineVertex::new([-1,  3,  1], [1.0, 1.0, 1.0, 1.0]),
-    // ]; //  0, 1, 1, 2, 2, 3, 3, 0, // square
 
+    // vertex data
     let lines_vd_buff = graphics.device.create_buffer::<LineVertex>(lines_vd.len(), gfx::UsageDynamic);
     graphics.device.update_buffer(lines_vd_buff, lines_vd.as_slice(), 0);
     let lines_mesh = Mesh::from_format(lines_vd_buff, lines_vd.len() as u32);
 
-
-    //let lines_mesh = graphics.device.create_mesh(lines_vd.as_slice());
-
+    // index data
     let mut lines_idxd = Vec::from_fn(lines_vd.len(), |i| i as u8);
     let lines_idx_buff = graphics.device.create_buffer::<u8>(lines_idxd.len(), gfx::UsageDynamic);
     graphics.device.update_buffer(lines_idx_buff, lines_idxd.as_slice(), 0);
@@ -385,14 +154,6 @@ fn main() {
         u_model_view_proj: vecmath::mat4_id(),
     };
 
-
-
-
-
-    //-------------------------------
-    //-------------------------------
-    //-------------------------------
-    //-------------------------------
 
     let model = vecmath::mat4_id();
     let mut projection = cam::CameraPerspective {
@@ -426,7 +187,6 @@ fn main() {
         e.render(|args| {
             graphics.clear(
                 gfx::ClearData {
-                    //color: [0.3, 0.3, 0.3, 1.0],
                     color: [0.0, 0.0, 0.0, 1.0],
                     depth: 1.0,
                     stencil: 0,
@@ -442,22 +202,6 @@ fn main() {
             translate[2][2] = scale;
 
             let scale = scale * 2.0 + 0.1;
-
-//            for x in range(0u, 3) {
-//                for z in range(0u, 3) {
-//                    translate[3][0] = scale * x as f32;
-//                    translate[3][2] = scale * z as f32;
-//
-//                    translate[3][1] = (frame_count as f32 / 60.0).sin() * x as f32 / 5.0 * z as f32 / 5.0;
-//
-//                    data.u_model_view_proj = cam::model_view_projection(
-//                            col_mat4_mul(model, translate),
-//                            first_person.camera(args.ext_dt).orthogonal(),
-//                            projection
-//                        );
-//                    graphics.draw(&batch, &data, &frame);
-//                }
-//            }
 
             lines_data.u_model_view_proj = cam::model_view_projection(
                     col_mat4_mul(model, translate),
@@ -482,8 +226,6 @@ fn main() {
                 graphics.device.update_buffer(lines_vd_buff, lines_vd.as_slice(), 0);
 
             }
-
-
         });
 
         e.resize(|w, h| {
