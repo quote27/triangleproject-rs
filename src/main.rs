@@ -120,7 +120,7 @@ fn rand_color() -> [f32, ..3] {
 fn main() {
     let (win_width, win_height) = (640, 480);
     let mut window = GlfwWindow::new(
-        shader_version::opengl::OpenGL_3_2,
+        shader_version::opengl::OpenGL::OpenGL_3_2,
         WindowSettings {
             title: "cube".to_string(),
             size: [win_width, win_height],
@@ -136,8 +136,8 @@ fn main() {
     let mut graphics = gfx::Graphics::new(device);
     let mut frame = gfx::Frame::new(win_width as u16, win_height as u16);
     let state = gfx::DrawState::new()
-        .depth(gfx::state::LessEqual, true)
-        .blend(gfx::BlendAlpha); // BlendAlpha or BlendAdditive
+        .depth(gfx::state::Comparison::LessEqual, true)
+        .blend(gfx::BlendPreset::Alpha); // BlendAlpha or BlendAdditive
 
 
     // start linedrawing prep
@@ -182,7 +182,7 @@ fn main() {
         }
     }
 
-    let lines_vd_buff = graphics.device.create_buffer::<LineVertex>(lines_vd.len(), gfx::UsageDynamic);
+    let lines_vd_buff = graphics.device.create_buffer::<LineVertex>(lines_vd.len(), gfx::BufferUsage::Dynamic);
     graphics.device.update_buffer(lines_vd_buff, lines_vd.as_slice(), 0);
     let lines_mesh = Mesh::from_format(lines_vd_buff, lines_vd.len() as u32);
 
@@ -203,13 +203,13 @@ fn main() {
         lines_tri_idxd.push(off + subdivide_lines as u16);
         lines_tri_idxd.push(off + subdivide_lines as u16 * 2);
     }
-    let lines_idx_buff = graphics.device.create_buffer::<u16>(lines_idxd.len(), gfx::UsageDynamic);
+    let lines_idx_buff = graphics.device.create_buffer::<u16>(lines_idxd.len(), gfx::BufferUsage::Dynamic);
     graphics.device.update_buffer(lines_idx_buff, lines_idxd.as_slice(), 0);
-    let lines_slice = lines_idx_buff.to_slice(gfx::Line);
+    let lines_slice = lines_idx_buff.to_slice(gfx::PrimitiveType::Line);
 
-    let lines_tri_idx_buff = graphics.device.create_buffer::<u16>(lines_tri_idxd.len(), gfx::UsageDynamic);
+    let lines_tri_idx_buff = graphics.device.create_buffer::<u16>(lines_tri_idxd.len(), gfx::BufferUsage::Dynamic);
     graphics.device.update_buffer(lines_tri_idx_buff, lines_tri_idxd.as_slice(), 0);
-    let lines_tri_slice = lines_tri_idx_buff.to_slice(gfx::TriangleList);
+    let lines_tri_slice = lines_tri_idx_buff.to_slice(gfx::PrimitiveType::TriangleList);
 
 
     let lines_prog = graphics.device.link_program(LINE_VERTEX_SRC.clone(), LINE_FRAGMENT_SRC.clone()).unwrap();
@@ -265,9 +265,10 @@ fn main() {
         cam::FirstPersonSettings::keyboard_wasd(),
     );
     {
-        use input::{keyboard, Keyboard};
-        first_person.settings.move_faster_button = Keyboard(keyboard::LShift);
-        first_person.settings.fly_down_button = Keyboard(keyboard::LCtrl);
+        use input::keyboard::Key;
+        use input::Button::Keyboard;
+        first_person.settings.move_faster_button = Keyboard(Key::LShift);
+        first_person.settings.fly_down_button = Keyboard(Key::LCtrl);
         first_person.settings.speed_vertical *= 2.0;
     }
 
@@ -416,9 +417,10 @@ fn main() {
         });
 
         e.press(|button| {
-            use input::{keyboard, Keyboard};
+            use input::keyboard::Key;
+            use input::Button::Keyboard;
             match button {
-                Keyboard(keyboard::P) => _pause = !_pause,
+                Keyboard(Key::P) => _pause = !_pause,
                 _ => ()
             }
         });
