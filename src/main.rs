@@ -190,24 +190,24 @@ fn main() {
     let mut lines_idxd = Vec::with_capacity(num_triangles * 6);
     let mut lines_tri_idxd = Vec::with_capacity(num_triangles * 3);
     for i in range(0, num_triangles) {
-        let off = (i * subdivide_lines) as u8 * 3;
+        let off = (i * subdivide_lines) as u16 * 3;
 
         lines_idxd.push(off + 0);
-        for j in range(1, 3 * subdivide_lines as u8) {
+        for j in range(1, 3 * subdivide_lines as u16) {
             lines_idxd.push(off + j);
             lines_idxd.push(off + j);
         }
         lines_idxd.push(off + 0);
 
         lines_tri_idxd.push(off + 0);
-        lines_tri_idxd.push(off + subdivide_lines as u8);
-        lines_tri_idxd.push(off + subdivide_lines as u8 * 2);
+        lines_tri_idxd.push(off + subdivide_lines as u16);
+        lines_tri_idxd.push(off + subdivide_lines as u16 * 2);
     }
-    let lines_idx_buff = graphics.device.create_buffer::<u8>(lines_idxd.len(), gfx::UsageDynamic);
+    let lines_idx_buff = graphics.device.create_buffer::<u16>(lines_idxd.len(), gfx::UsageDynamic);
     graphics.device.update_buffer(lines_idx_buff, lines_idxd.as_slice(), 0);
     let lines_slice = lines_idx_buff.to_slice(gfx::Line);
 
-    let lines_tri_idx_buff = graphics.device.create_buffer::<u8>(lines_tri_idxd.len(), gfx::UsageDynamic);
+    let lines_tri_idx_buff = graphics.device.create_buffer::<u16>(lines_tri_idxd.len(), gfx::UsageDynamic);
     graphics.device.update_buffer(lines_tri_idx_buff, lines_tri_idxd.as_slice(), 0);
     let lines_tri_slice = lines_tri_idx_buff.to_slice(gfx::TriangleList);
 
@@ -273,13 +273,15 @@ fn main() {
 
     // let mut rng = rand::task_rng();
     let mut frame_count = 0u;
+    let mut _pause = false;
 
     let window = RefCell::new(window);
     for e in Events::new(&window) {
-        use event::{RenderEvent, ResizeEvent};
+        use event::{RenderEvent, ResizeEvent, PressEvent};
 
         first_person.event(&e);
         e.render(|args| {
+
             graphics.clear(
                 gfx::ClearData {
                     color: [0.0, 0.0, 0.0, 1.0],
@@ -301,10 +303,11 @@ fn main() {
 
             graphics.draw(&lines_batch, &lines_data, &frame);
 
+            // draw triangle
             lines_data.u_alpha = 0.3;
             graphics.draw(&lines_tri_batch, &lines_data, &frame);
 
-
+            // draw plane
             // translate[3][0] = 3.0;
             // lines_data.u_model_view_proj = cam::model_view_projection(
             //         vecmath::col_mat4_mul(model, translate),
@@ -316,16 +319,28 @@ fn main() {
             graphics.end_frame();
             frame_count += 1;
 
+            if _pause { return; }
+
+            // change line connections
             // if frame_count % 10 == 0 {
             //     rng.shuffle(lines_idxd.as_mut_slice());
             //     graphics.device.update_buffer(lines_idx_buff, lines_idxd.as_slice(), 0);
             // }
 
-            if frame_count % 5 == 0 {
+            let mut _update_buff = false;
+
+            // flip waveform each frame
+            if false && frame_count % 4 == 0 {
+                for lv in lines_vd.iter_mut() {
+                    lv.a_normal = vecmath::vec3_sub([0.0, 0.0, 0.0], lv.a_normal);
+                }
+
+                _update_buff = true;
+            }
+
+            // scroll colors [optionally flip waveform to make it look like a static scroll]
+            if false && frame_count % 2 == 0 {
                 let color_0 = lines_vd[0].a_color;
-                // for lv in lines_vd.iter_mut() {
-                //     lv.a_normal = vecmath::vec3_sub([0.0, 0.0, 0.0], lv.a_normal);
-                // }
                 for i in range(0, lines_vd.len()-1) {
                     lines_vd[i].a_normal = vecmath::vec3_sub([0.0, 0.0, 0.0], lines_vd[i].a_normal);
                     lines_vd[i].a_color = lines_vd[i+1].a_color;
@@ -334,13 +349,57 @@ fn main() {
                 lines_vd[last_idx].a_normal = vecmath::vec3_sub([0.0, 0.0, 0.0], lines_vd[last_idx].a_normal);
                 lines_vd[last_idx].a_color = color_0;
 
-                graphics.device.update_buffer(lines_vd_buff, lines_vd.as_slice(), 0);
+                _update_buff = true;
             }
 
-            if false && frame_count % 20 == 0 {
+            // generate new triangles
+            if true && frame_count % 20 == 0 {
                 for lv in lines_vd.iter_mut() {
                     *lv = LineVertex::rand_pos(rand_color());
                 }
+
+                _update_buff = true;
+            }
+
+            if false && frame_count % 30 == 0 {
+                lines_vd.clear();
+                for _ in range(0, num_triangles) {
+                    let a = LineVertex::rand_pos(rand_color());
+                    let b = LineVertex::rand_pos(rand_color());
+                    let c = LineVertex::rand_pos(rand_color());
+
+                    // calculate triangle normal
+                    let ba = vecmath::vec3_sub(b.a_pos, a.a_pos);
+                    let ca = vecmath::vec3_sub(c.a_pos, a.a_pos);
+                    let tnorm = vecmath::vec3_normalized(vecmath::vec3_cross(ba, ca));
+
+                    for i in range(0u, 3) {
+                        let (t1, t2) = match i {
+                            0 => (a, b),
+                            1 => (b, c),
+                            _ => (c, a),
+                        };
+
+                        let v = vecmath::vec3_sub(t2.a_pos, t1.a_pos);
+                        let vdiv = vecmath::vec3_scale(v, 1.0 / subdivide_lines as f32);
+
+                        let mut p1 = t1.a_pos;
+                        lines_vd.push(LineVertex::new(p1, rand_color(), [0.0, 0.0, 0.0]));
+                        p1 = vecmath::vec3_add(p1, vdiv);
+
+                        for j in range(1u, subdivide_lines) {
+                            if j % 2 == 0 {
+                                lines_vd.push(LineVertex::new(p1, rand_color(), tnorm));
+                            } else {
+                                lines_vd.push(LineVertex::new(p1, rand_color(), vecmath::vec3_sub([0.0, 0.0, 0.0], tnorm)));
+                            }
+                            p1 = vecmath::vec3_add(p1, vdiv);
+                        } // intentionally skip last position
+                    }
+                }
+            }
+
+            if _update_buff {
                 graphics.device.update_buffer(lines_vd_buff, lines_vd.as_slice(), 0);
             }
         });
@@ -354,6 +413,14 @@ fn main() {
                 far_clip: 1000.0,
                 aspect_ratio: (w as f32) / (h as f32)
             }.projection();
+        });
+
+        e.press(|button| {
+            use input::{keyboard, Keyboard};
+            match button {
+                Keyboard(keyboard::P) => _pause = !_pause,
+                _ => ()
+            }
         });
     }
 }
