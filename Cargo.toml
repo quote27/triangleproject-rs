@@ -1,17 +1,37 @@
 [package]
-
-name = "randtri-rs"
+name = "triangleproject-rs"
 version = "0.0.1"
 authors = ["quote <quote@lv0.io>"]
 
-[dependencies.piston]
-git = "https://github.com/pistondevelopers/piston"
+[[bin]]
+name = "triangleproject"
+path = "src/main.rs"
 
-[dependencies.glfw_window]
-git = "https://github.com/pistondevelopers/glfw_window"
+[dependencies.gfx]
+git = "https://github.com/gfx-rs/gfx-rs"
 
-[dependencies.graphics]
-git = "https://github.com/pistondevelopers/graphics"
+[dependencies.gfx_macros]
+git = "https://github.com/gfx-rs/gfx-rs"
 
-[dependencies.opengl_graphics]
-git = "https://github.com/pistondevelopers/opengl_graphics"
+[dependencies.shader_version]
+git = "https://github.com/PistonDevelopers/shader_version"
+
+
+[dependencies.pistoncore-glfw_window]
+git = "https://github.com/PistonDevelopers/glfw_window"
+
+[dependencies.quack]
+git = "https://github.com/pistondevelopers/quack"
+
+[dependencies.pistoncore-input]
+git = "https://github.com/pistondevelopers/input"
+
+
+[dependencies.pistoncore-event]
+git = "https://github.com/PistonDevelopers/event"
+
+[dependencies.vecmath]
+git = "https://github.com/PistonDevelopers/vecmath"
+
+[dependencies.piston3d-cam]
+git = "https://github.com/PistonDevelopers/cam"

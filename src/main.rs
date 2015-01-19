@@ -1,49 +1,48 @@
-#![feature(phase)]
-#![feature(globs)]
+#![allow(unstable)]
+#![feature(plugin)]
 
-extern crate current;
-extern crate shader_version;
-extern crate vecmath;
-extern crate event;
-extern crate input;
-extern crate cam;
 extern crate gfx;
-extern crate glfw;
-extern crate glfw_window;
-// extern crate sdl2;
-// extern crate sdl2_window;
-#[phase(plugin)]
+#[macro_use]
+#[plugin]
 extern crate gfx_macros;
-extern crate time;
+extern crate shader_version;
 
-use current::{ Set };
+extern crate glfw_window;
+extern crate quack;
+extern crate input;
+extern crate event;
+extern crate vecmath;
+extern crate cam;
+
 use std::rand;
 use std::cell::RefCell;
+use quack::{ Set };
 use glfw_window::GlfwWindow;
 // use sdl2_window::Sdl2Window;
 use gfx::{ Device, DeviceHelper, ToSlice, Mesh };
-use event::{ Events, WindowSettings };
+use event::{ WindowSettings };
 use event::window::{ CaptureCursor };
 
 //----------------------------------------
 // line associated data
 
 #[vertex_format]
+#[derive(Copy)]
 struct LineVertex {
-    a_pos: [f32, ..3],
-    a_color: [f32, ..3],
-    a_normal: [f32, ..3],
+    a_pos: [f32; 3],
+    a_color: [f32; 3],
+    a_normal: [f32; 3],
 }
 
 impl LineVertex {
-    fn new(pos: [f32, ..3], color: [f32, ..3], normal: [f32, ..3]) -> LineVertex {
+    fn new(pos: [f32; 3], color: [f32; 3], normal: [f32; 3]) -> LineVertex {
         LineVertex {
             a_pos: pos,
             a_color: color,
             a_normal: normal,
         }
     }
-    fn rand_pos(color: [f32, ..3]) -> LineVertex {
+    fn rand_pos(color: [f32; 3]) -> LineVertex {
         let x = rand::random::<f32>();
         let y = rand::random::<f32>();
         let z = rand::random::<f32>();
@@ -54,13 +53,13 @@ impl LineVertex {
 
 #[shader_param(LineBatch)]
 struct LineParams {
-    u_model_view_proj: [[f32, ..4], ..4],
-    u_normal_mat: [[f32, ..3], ..3],
+    u_model_view_proj: [[f32; 4]; 4],
+    u_normal_mat: [[f32; 3]; 3],
     u_alpha: f32,
 }
 
 static LINE_VERTEX_SRC: gfx::ShaderSource<'static> = shaders! {
-GLSL_120: b"
+glsl_120: b"
     #version 120
     attribute vec3 a_pos;
     attribute vec3 a_color;
@@ -75,8 +74,8 @@ GLSL_120: b"
         //vec3 off = vec3(0.0); //normalize(u_normal_mat * a_normal);
         gl_Position = u_model_view_proj * vec4(a_pos + a_normal * 0.02 * a_color.b, 1.0);
     }
-"
-GLSL_150: b"
+",
+glsl_150: b"
     #version 150 core
     in vec3 a_pos;
     in vec3 a_color;
@@ -94,14 +93,14 @@ GLSL_150: b"
 };
 
 static LINE_FRAGMENT_SRC: gfx::ShaderSource<'static> = shaders! {
-GLSL_120: b"
+glsl_120: b"
     #version 120
     varying vec4 v_color;
     void main() {
         gl_FragColor = v_color;
     }
-"
-GLSL_150: b"
+",
+glsl_150: b"
     #version 150 core
     in vec4 v_color;
     out vec4 o_color;
@@ -112,15 +111,52 @@ GLSL_150: b"
 };
 
 #[inline]
-fn rand_color() -> [f32, ..3] {
+fn rand_color() -> [f32; 3] {
     [rand::random::<f32>(), rand::random::<f32>(), rand::random::<f32>()]
     //[0.0, 0.2, 0.8]
+}
+
+fn rand_triangles(lines_vd: &mut Vec<LineVertex>, num_triangles: usize, subdivide_lines: usize) {
+    for _ in range(0, num_triangles) {
+        let a = LineVertex::rand_pos(rand_color());
+        let b = LineVertex::rand_pos(rand_color());
+        let c = LineVertex::rand_pos(rand_color());
+
+        // calculate triangle normal
+        let ba = vecmath::vec3_sub(b.a_pos, a.a_pos);
+        let ca = vecmath::vec3_sub(c.a_pos, a.a_pos);
+        let tnorm = vecmath::vec3_normalized(vecmath::vec3_cross(ba, ca));
+
+        for i in range(0u8, 3) {
+            let (t1, t2) = match i {
+                    0 => (a, b),
+                    1 => (b, c),
+                    _ => (c, a),
+                };
+
+            let v = vecmath::vec3_sub(t2.a_pos, t1.a_pos);
+            let vdiv = vecmath::vec3_scale(v, 1.0 / subdivide_lines as f32);
+
+            let mut p1 = t1.a_pos;
+            lines_vd.push(LineVertex::new(p1, rand_color(), [0.0, 0.0, 0.0]));
+            p1 = vecmath::vec3_add(p1, vdiv);
+
+            for j in range(1, subdivide_lines) {
+                if j % 2 == 0 {
+                    lines_vd.push(LineVertex::new(p1, rand_color(), tnorm));
+                } else {
+                    lines_vd.push(LineVertex::new(p1, rand_color(), vecmath::vec3_sub([0.0, 0.0, 0.0], tnorm)));
+                }
+                p1 = vecmath::vec3_add(p1, vdiv);
+            } // i32entionally skip last position
+        }
+    }
 }
 
 fn main() {
     let (win_width, win_height) = (640, 480);
     let mut window = GlfwWindow::new(
-        shader_version::opengl::OpenGL::OpenGL_3_2,
+        shader_version::opengl::OpenGL::_3_2,
         WindowSettings {
             title: "cube".to_string(),
             size: [win_width, win_height],
@@ -141,46 +177,18 @@ fn main() {
 
 
     // start linedrawing prep
-    let num_triangles = 4;
-    let subdivide_lines = 16;
+    let num_triangles = 4us;
+    let subdivide_lines = 32us;
+
+    let mut _flip_wireframe = false;
+    let mut _scroll_colors = false;
+    let mut _generate_new_triangles = true;
+
 
     // vertex data
     //let mut lines_vd = Vec::from_fn(num_triangles * 3, |_| LineVertex::rand_pos(rand_color()));
     let mut lines_vd = Vec::new(); //Vec::from_fn(num_triangles * 3, |_| LineVertex::rand_pos(rand_color()));
-    for _ in range(0, num_triangles) {
-        let a = LineVertex::rand_pos(rand_color());
-        let b = LineVertex::rand_pos(rand_color());
-        let c = LineVertex::rand_pos(rand_color());
-
-        // calculate triangle normal
-        let ba = vecmath::vec3_sub(b.a_pos, a.a_pos);
-        let ca = vecmath::vec3_sub(c.a_pos, a.a_pos);
-        let tnorm = vecmath::vec3_normalized(vecmath::vec3_cross(ba, ca));
-
-        for i in range(0u, 3) {
-            let (t1, t2) = match i {
-                    0 => (a, b),
-                    1 => (b, c),
-                    _ => (c, a),
-                };
-
-            let v = vecmath::vec3_sub(t2.a_pos, t1.a_pos);
-            let vdiv = vecmath::vec3_scale(v, 1.0 / subdivide_lines as f32);
-
-            let mut p1 = t1.a_pos;
-            lines_vd.push(LineVertex::new(p1, rand_color(), [0.0, 0.0, 0.0]));
-            p1 = vecmath::vec3_add(p1, vdiv);
-
-            for j in range(1u, subdivide_lines) {
-                if j % 2 == 0 {
-                    lines_vd.push(LineVertex::new(p1, rand_color(), tnorm));
-                } else {
-                    lines_vd.push(LineVertex::new(p1, rand_color(), vecmath::vec3_sub([0.0, 0.0, 0.0], tnorm)));
-                }
-                p1 = vecmath::vec3_add(p1, vdiv);
-            } // intentionally skip last position
-        }
-    }
+    rand_triangles(&mut lines_vd, num_triangles, subdivide_lines);
 
     let lines_vd_buff = graphics.device.create_buffer::<LineVertex>(lines_vd.len(), gfx::BufferUsage::Dynamic);
     graphics.device.update_buffer(lines_vd_buff, lines_vd.as_slice(), 0);
@@ -230,7 +238,7 @@ fn main() {
     //         LineVertex::new([ 0.0 ,  0.0,  1.0], [1.0, 1.0, 1.0]), // front / nose
     //         LineVertex::new([ 0.75,  0.0, -1.0], [1.0, 1.0, 1.0]), // left wing - 'port'
     //         LineVertex::new([-0.75,  0.0, -1.0], [1.0, 1.0, 1.0]), // right wing - 'starboard'
-    //         LineVertex::new([ 0.0 ,  0.0, -1.0], [1.0, 1.0, 1.0]), // back midpoint between wings
+    //         LineVertex::new([ 0.0 ,  0.0, -1.0], [1.0, 1.0, 1.0]), // back midpoi32 between wings
     //         LineVertex::new([ 0.0 , -0.4, -1.0], [1.0, 1.0, 1.0]), // back bottom fin
     //     );
 
@@ -273,15 +281,16 @@ fn main() {
     }
 
     // let mut rng = rand::task_rng();
-    let mut frame_count = 0u;
+    let mut frame_count = 0u32;
     let mut _pause = false;
 
     let window = RefCell::new(window);
-    for e in Events::new(&window) {
-        use event::{RenderEvent, ResizeEvent, PressEvent};
+    //for e in Events::new(&window) {
+    for e in event::events(&window) {
+        use event::{RenderEvent, RenderArgs, ResizeEvent, PressEvent};
 
         first_person.event(&e);
-        e.render(|args| {
+        e.render(|&mut: &args: &RenderArgs| {
 
             graphics.clear(
                 gfx::ClearData {
@@ -330,6 +339,13 @@ fn main() {
 
             let mut _update_buff = false;
 
+            //if frame_count % 100 == 0 {
+            //    subdivide_lines = match subdivide_lines {
+            //        1 => 16,
+            //        _ => 1,
+            //    }
+            //}
+
             // flip waveform each frame
             if false && frame_count % 4 == 0 {
                 for lv in lines_vd.iter_mut() {
@@ -353,51 +369,11 @@ fn main() {
                 _update_buff = true;
             }
 
-            // generate new triangles
-            if true && frame_count % 20 == 0 {
-                for lv in lines_vd.iter_mut() {
-                    *lv = LineVertex::rand_pos(rand_color());
-                }
-
-                _update_buff = true;
-            }
-
-            if false && frame_count % 30 == 0 {
+            // generate new subdivide triangles
+            if true && frame_count % 30 == 0 {
                 lines_vd.clear();
-                for _ in range(0, num_triangles) {
-                    let a = LineVertex::rand_pos(rand_color());
-                    let b = LineVertex::rand_pos(rand_color());
-                    let c = LineVertex::rand_pos(rand_color());
-
-                    // calculate triangle normal
-                    let ba = vecmath::vec3_sub(b.a_pos, a.a_pos);
-                    let ca = vecmath::vec3_sub(c.a_pos, a.a_pos);
-                    let tnorm = vecmath::vec3_normalized(vecmath::vec3_cross(ba, ca));
-
-                    for i in range(0u, 3) {
-                        let (t1, t2) = match i {
-                            0 => (a, b),
-                            1 => (b, c),
-                            _ => (c, a),
-                        };
-
-                        let v = vecmath::vec3_sub(t2.a_pos, t1.a_pos);
-                        let vdiv = vecmath::vec3_scale(v, 1.0 / subdivide_lines as f32);
-
-                        let mut p1 = t1.a_pos;
-                        lines_vd.push(LineVertex::new(p1, rand_color(), [0.0, 0.0, 0.0]));
-                        p1 = vecmath::vec3_add(p1, vdiv);
-
-                        for j in range(1u, subdivide_lines) {
-                            if j % 2 == 0 {
-                                lines_vd.push(LineVertex::new(p1, rand_color(), tnorm));
-                            } else {
-                                lines_vd.push(LineVertex::new(p1, rand_color(), vecmath::vec3_sub([0.0, 0.0, 0.0], tnorm)));
-                            }
-                            p1 = vecmath::vec3_add(p1, vdiv);
-                        } // intentionally skip last position
-                    }
-                }
+                rand_triangles(&mut lines_vd, num_triangles, subdivide_lines);
+                _update_buff = true;
             }
 
             if _update_buff {
@@ -405,7 +381,7 @@ fn main() {
             }
         });
 
-        e.resize(|w, h| {
+        e.resize(|&mut: w: u32, h: u32| {
             frame = gfx::Frame::new(w as u16, h as u16);
 
             projection = cam::CameraPerspective {
@@ -416,7 +392,7 @@ fn main() {
             }.projection();
         });
 
-        e.press(|button| {
+        e.press(|&mut: button| {
             use input::keyboard::Key;
             use input::Button::Keyboard;
             match button {
