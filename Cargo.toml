@@ -16,7 +16,6 @@ git = "https://github.com/gfx-rs/gfx-rs"
 [dependencies.shader_version]
 git = "https://github.com/PistonDevelopers/shader_version"
 
-
 [dependencies.pistoncore-glfw_window]
 git = "https://github.com/PistonDevelopers/glfw_window"
 
@@ -25,7 +24,6 @@ git = "https://github.com/pistondevelopers/quack"
 
 [dependencies.pistoncore-input]
 git = "https://github.com/pistondevelopers/input"
-
 
 [dependencies.pistoncore-event]
 git = "https://github.com/PistonDevelopers/event"
