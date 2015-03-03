@@ -1,27 +1,30 @@
-#![allow(unstable)]
-#![feature(plugin)]
+#![feature(plugin, custom_attribute)]
+#![plugin(gfx_macros)]
 
 extern crate gfx;
-#[macro_use]
-#[plugin]
-extern crate gfx_macros;
+extern crate gfx_device_gl;
 extern crate shader_version;
 
 extern crate glfw_window;
+extern crate window;
 extern crate quack;
 extern crate input;
 extern crate event;
 extern crate vecmath;
 extern crate cam;
+extern crate camera_controllers;
+extern crate rand;
 
-use std::rand;
 use std::cell::RefCell;
 use quack::{ Set };
 use glfw_window::GlfwWindow;
 // use sdl2_window::Sdl2Window;
-use gfx::{ Device, DeviceHelper, ToSlice, Mesh };
-use event::{ WindowSettings };
-use event::window::{ CaptureCursor };
+use gfx::{ Device, DeviceExt, ToSlice, Mesh, Resources };
+use window::{ WindowSettings, CaptureCursor };
+use timer::{ Timer, TimeMap };
+use camera_controllers::{ FirstPerson, FirstPersonSettings };
+
+mod timer;
 
 //----------------------------------------
 // line associated data
@@ -51,15 +54,18 @@ impl LineVertex {
     }
 }
 
-#[shader_param(LineBatch)]
-struct LineParams {
+#[shader_param]
+struct LineParams<R: gfx::Resources> {
+    #[name = "u_model_view_proj"]
     u_model_view_proj: [[f32; 4]; 4],
+    #[name = "u_normal_mat"]
     u_normal_mat: [[f32; 3]; 3],
+    #[name = "u_alpha"]
     u_alpha: f32,
+    _dummy: std::marker::PhantomData<R>,
 }
 
-static LINE_VERTEX_SRC: gfx::ShaderSource<'static> = shaders! {
-glsl_120: b"
+const LINE_VERTEX_SRC: [&'static [u8]; 2] = [ b"
     #version 120
     attribute vec3 a_pos;
     attribute vec3 a_color;
@@ -74,8 +80,7 @@ glsl_120: b"
         //vec3 off = vec3(0.0); //normalize(u_normal_mat * a_normal);
         gl_Position = u_model_view_proj * vec4(a_pos + a_normal * 0.02 * a_color.b, 1.0);
     }
-",
-glsl_150: b"
+", b"
     #version 150 core
     in vec3 a_pos;
     in vec3 a_color;
@@ -89,26 +94,22 @@ glsl_150: b"
         //vec3 off = vec3(0.0); //normalize(u_normal_mat * a_normal);
         gl_Position = u_model_view_proj * vec4(a_pos + a_normal * 0.02 * a_color.b, 1.0);
     }
-"
-};
+"];
 
-static LINE_FRAGMENT_SRC: gfx::ShaderSource<'static> = shaders! {
-glsl_120: b"
+const LINE_FRAGMENT_SRC: [&'static [u8]; 2] = [ b"
     #version 120
     varying vec4 v_color;
     void main() {
         gl_FragColor = v_color;
     }
-",
-glsl_150: b"
+", b"
     #version 150 core
     in vec4 v_color;
     out vec4 o_color;
     void main() {
         o_color = v_color;
     }
-"
-};
+"];
 
 #[inline]
 fn rand_color() -> [f32; 3] {
@@ -117,7 +118,7 @@ fn rand_color() -> [f32; 3] {
 }
 
 fn rand_triangles(lines_vd: &mut Vec<LineVertex>, num_triangles: usize, subdivide_lines: usize) {
-    for _ in range(0, num_triangles) {
+    for _ in 0..num_triangles {
         let a = LineVertex::rand_pos(rand_color());
         let b = LineVertex::rand_pos(rand_color());
         let c = LineVertex::rand_pos(rand_color());
@@ -127,7 +128,7 @@ fn rand_triangles(lines_vd: &mut Vec<LineVertex>, num_triangles: usize, subdivid
         let ca = vecmath::vec3_sub(c.a_pos, a.a_pos);
         let tnorm = vecmath::vec3_normalized(vecmath::vec3_cross(ba, ca));
 
-        for i in range(0u8, 3) {
+        for i in 0u8..3 {
             let (t1, t2) = match i {
                     0 => (a, b),
                     1 => (b, c),
@@ -141,7 +142,7 @@ fn rand_triangles(lines_vd: &mut Vec<LineVertex>, num_triangles: usize, subdivid
             lines_vd.push(LineVertex::new(p1, rand_color(), [0.0, 0.0, 0.0]));
             p1 = vecmath::vec3_add(p1, vdiv);
 
-            for j in range(1, subdivide_lines) {
+            for j in 1..subdivide_lines {
                 if j % 2 == 0 {
                     lines_vd.push(LineVertex::new(p1, rand_color(), tnorm));
                 } else {
@@ -168,8 +169,8 @@ fn main() {
 
     window.set_mut(CaptureCursor(true));
 
-    let device = gfx::GlDevice::new(|s| window.window.get_proc_address(s));
-    let mut graphics = gfx::Graphics::new(device);
+    type R = gfx_device_gl::GlResources;
+    let mut device = gfx_device_gl::GlDevice::new(|s| window.window.get_proc_address(s));
     let mut frame = gfx::Frame::new(win_width as u16, win_height as u16);
     let state = gfx::DrawState::new()
         .depth(gfx::state::Comparison::LessEqual, true)
@@ -177,8 +178,8 @@ fn main() {
 
 
     // start linedrawing prep
-    let num_triangles = 4us;
-    let subdivide_lines = 32us;
+    let num_triangles = 4usize;
+    let subdivide_lines = 32usize;
 
     let mut _flip_wireframe = false;
     let mut _scroll_colors = false;
@@ -190,18 +191,18 @@ fn main() {
     let mut lines_vd = Vec::new(); //Vec::from_fn(num_triangles * 3, |_| LineVertex::rand_pos(rand_color()));
     rand_triangles(&mut lines_vd, num_triangles, subdivide_lines);
 
-    let lines_vd_buff = graphics.device.create_buffer::<LineVertex>(lines_vd.len(), gfx::BufferUsage::Dynamic);
-    graphics.device.update_buffer(lines_vd_buff, lines_vd.as_slice(), 0);
+    let lines_vd_buff = device.create_buffer::<LineVertex>(lines_vd.len(), gfx::BufferUsage::Dynamic);
+    device.update_buffer(lines_vd_buff, lines_vd.as_slice(), 0);
     let lines_mesh = Mesh::from_format(lines_vd_buff, lines_vd.len() as u32);
 
     // index data
     let mut lines_idxd = Vec::with_capacity(num_triangles * 6);
     let mut lines_tri_idxd = Vec::with_capacity(num_triangles * 3);
-    for i in range(0, num_triangles) {
+    for i in 0..num_triangles {
         let off = (i * subdivide_lines) as u16 * 3;
 
         lines_idxd.push(off + 0);
-        for j in range(1, 3 * subdivide_lines as u16) {
+        for j in 1..3 * subdivide_lines as u16 {
             lines_idxd.push(off + j);
             lines_idxd.push(off + j);
         }
@@ -211,24 +212,43 @@ fn main() {
         lines_tri_idxd.push(off + subdivide_lines as u16);
         lines_tri_idxd.push(off + subdivide_lines as u16 * 2);
     }
-    let lines_idx_buff = graphics.device.create_buffer::<u16>(lines_idxd.len(), gfx::BufferUsage::Dynamic);
-    graphics.device.update_buffer(lines_idx_buff, lines_idxd.as_slice(), 0);
+    let lines_idx_buff = device.create_buffer::<u16>(lines_idxd.len(), gfx::BufferUsage::Dynamic);
+    device.update_buffer(lines_idx_buff, lines_idxd.as_slice(), 0);
     let lines_slice = lines_idx_buff.to_slice(gfx::PrimitiveType::Line);
 
-    let lines_tri_idx_buff = graphics.device.create_buffer::<u16>(lines_tri_idxd.len(), gfx::BufferUsage::Dynamic);
-    graphics.device.update_buffer(lines_tri_idx_buff, lines_tri_idxd.as_slice(), 0);
+    let lines_tri_idx_buff = device.create_buffer::<u16>(lines_tri_idxd.len(), gfx::BufferUsage::Dynamic);
+    device.update_buffer(lines_tri_idx_buff, lines_tri_idxd.as_slice(), 0);
     let lines_tri_slice = lines_tri_idx_buff.to_slice(gfx::PrimitiveType::TriangleList);
 
 
-    let lines_prog = graphics.device.link_program(LINE_VERTEX_SRC.clone(), LINE_FRAGMENT_SRC.clone()).unwrap();
+    let line_vertex = gfx::ShaderSource {
+        glsl_120: Some(LINE_VERTEX_SRC[0]),
+        glsl_150: Some(LINE_VERTEX_SRC[1]),
+        .. gfx::ShaderSource::empty()
+    };
+    let line_fragment = gfx::ShaderSource {
+        glsl_120: Some(LINE_FRAGMENT_SRC[0]),
+        glsl_150: Some(LINE_FRAGMENT_SRC[1]),
+        .. gfx::ShaderSource::empty()
+    };
 
-    let lines_batch: LineBatch = graphics.make_batch(&lines_prog, &lines_mesh, lines_slice, &state).unwrap();
-    let lines_tri_batch: LineBatch = graphics.make_batch(&lines_prog, &lines_mesh, lines_tri_slice, &state).unwrap();
+    let shader_model = device.get_capabilities().shader_model;
+
+    let lines_prog = device.link_program(
+        line_vertex.choose(shader_model).unwrap(),
+        line_fragment.choose(shader_model).unwrap(),
+    ).unwrap();
+
+    let mut graphics = gfx::Graphics::new(device);
+
+    let lines_batch: gfx::batch::RefBatch<LineParams<R>> = graphics.make_batch(&lines_prog, &lines_mesh, lines_slice, &state).unwrap();
+    let lines_tri_batch: gfx::batch::RefBatch<LineParams<R>> = graphics.make_batch(&lines_prog, &lines_mesh, lines_tri_slice, &state).unwrap();
 
     let mut lines_data = LineParams {
         u_model_view_proj: vecmath::mat4_id(),
         u_alpha: 1.0,
         u_normal_mat: vecmath::mat3_id(),
+        _dummy: std::marker::PhantomData,
     };
 
 
@@ -268,9 +288,9 @@ fn main() {
             aspect_ratio: (win_width as f32) / (win_height as f32)
         }.projection();
 
-    let mut first_person = cam::FirstPerson::new(
+    let mut first_person = FirstPerson::new(
         [0.5f32, 0.5, 4.0],
-        cam::FirstPersonSettings::keyboard_wasd(),
+        FirstPersonSettings::keyboard_wasd(),
     );
     {
         use input::keyboard::Key;
@@ -282,15 +302,15 @@ fn main() {
 
     // let mut rng = rand::task_rng();
     let mut frame_count = 0u32;
-    let mut _pause = false;
+    let mut _pause = true;
+
 
     let window = RefCell::new(window);
-    //for e in Events::new(&window) {
     for e in event::events(&window) {
         use event::{RenderEvent, RenderArgs, ResizeEvent, PressEvent};
 
         first_person.event(&e);
-        e.render(|&mut: &args: &RenderArgs| {
+        e.render(|args: &RenderArgs| {
 
             graphics.clear(
                 gfx::ClearData {
@@ -358,7 +378,7 @@ fn main() {
             // scroll colors [optionally flip waveform to make it look like a static scroll]
             if false && frame_count % 2 == 0 {
                 let color_0 = lines_vd[0].a_color;
-                for i in range(0, lines_vd.len()-1) {
+                for i in 0..lines_vd.len()-1 {
                     lines_vd[i].a_normal = vecmath::vec3_sub([0.0, 0.0, 0.0], lines_vd[i].a_normal);
                     lines_vd[i].a_color = lines_vd[i+1].a_color;
                 }
@@ -370,7 +390,7 @@ fn main() {
             }
 
             // generate new subdivide triangles
-            if true && frame_count % 30 == 0 {
+            if frame_count % 30 == 0 {
                 lines_vd.clear();
                 rand_triangles(&mut lines_vd, num_triangles, subdivide_lines);
                 _update_buff = true;
@@ -381,7 +401,7 @@ fn main() {
             }
         });
 
-        e.resize(|&mut: w: u32, h: u32| {
+        e.resize(|w: u32, h: u32| {
             frame = gfx::Frame::new(w as u16, h as u16);
 
             projection = cam::CameraPerspective {
@@ -392,7 +412,7 @@ fn main() {
             }.projection();
         });
 
-        e.press(|&mut: button| {
+        e.press(|button| {
             use input::keyboard::Key;
             use input::Button::Keyboard;
             match button {
